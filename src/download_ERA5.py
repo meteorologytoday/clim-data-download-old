@@ -20,7 +20,7 @@ def ifSkip(dt):
 
     return False
 
-nproc = 2
+nproc = 5
 # ERA5 data is output in hourly fashion.
 # Each dhrs specify the averaged time after downloading data
 dhrs = [ 3, 24, ] 
@@ -31,8 +31,10 @@ for dhr in dhrs:
 
 varnames = [
     'geopotential', 
-    'surface_pressure',
+    'mean_sea_level_pressure',
     'sea_surface_temperature',
+    '10m_u_component_of_wind', 
+    '10m_v_component_of_wind', 
 ]
 
 var_type = dict(
@@ -42,6 +44,9 @@ var_type = dict(
     ],
     
     surface  = [
+        '10m_u_component_of_wind', 
+        '10m_v_component_of_wind', 
+        'mean_sea_level_pressure',
         'sea_surface_temperature',
         'surface_pressure',
     ],
@@ -92,8 +97,6 @@ def doJob(t, varname, detect_phase=False):
         
         file_prefix = "ERA5"
  
-
-
         tmp_filename_downloading = os.path.join(download_tmp_dir, "%s-%s-%s.nc.downloading.tmp" % (file_prefix, varname, time_str,))
         tmp_filename_downloaded  = os.path.join(download_tmp_dir, "%s-%s-%s.nc.downloaded.tmp" % (file_prefix, varname, time_str,))
 
@@ -120,10 +123,11 @@ def doJob(t, varname, detect_phase=False):
                 # distribution. I use variable `phase` to label
                 # this stage.
                 if detect_phase is True:
-                    if not os.path.isfile(output_filename):
-                        result['status'] = 'OK' 
-                        result['need_work'] = True 
-                        return result
+                    result['need_work'] = not os.path.isfile(output_filename)
+                    result['status'] = 'OK' 
+                    return result
+                        
+
   
                 if os.path.isfile(output_filename):
                     print("[%s] Data already exists. Skip." % (full_time_str, ))
@@ -237,8 +241,11 @@ for dt in dts:
         continue
 
     for varname in varnames:
-        
+    
         result = doJob(dt, varname, detect_phase=True)
+        
+        if result['status'] != 'OK':
+            print("[detect] Failed to detect variable `%s` of date %s " % (varname, str(dt)))
         
         if result['need_work'] is False:
             print("[detect] Files all exist for (date, varname) =  (%s, %s)." % (time_str, varname))

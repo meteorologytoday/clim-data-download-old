@@ -10,8 +10,8 @@ def pleaseRun(cmd):
     print(">> %s" % cmd)
     os.system(cmd)
 
-beg_time = datetime.datetime(1992,     9, 30)
-end_time = datetime.datetime(2017,     4, 1)
+beg_time = datetime.datetime(1993,     1, 1)
+end_time = datetime.datetime(2005,    12, 1)
 
 archive_root = "data"
 
