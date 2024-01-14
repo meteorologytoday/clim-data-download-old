@@ -15,5 +15,6 @@
 *.log
 *.zip
 *.mp4
+*.swp
 __pycache__/
 
