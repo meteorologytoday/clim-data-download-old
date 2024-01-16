@@ -56,8 +56,10 @@ def computeARvariables(ds):
 
     dims = ["time", "latitude", "longitude"]
     AR_vars = {
-        'IWV' : (dims, np.sum(q * lev_weight, axis=1)),
-        'IVT' : (dims, np.sqrt(np.sum(q * U * lev_weight, axis=1)**2 + np.sum(q * V * lev_weight, axis=1)**2)),
+        'IWV'   : (dims, np.sum(q * lev_weight, axis=1)),
+        'IVT'   : (dims, np.sqrt(np.sum(q * U * lev_weight, axis=1)**2 + np.sum(q * V * lev_weight, axis=1)**2)),
+        'IVT_x' : (dims,np.sum(q * U * lev_weight, axis=1)),
+        'IVT_y' : (dims,np.sum(q * V * lev_weight, axis=1)),
         'IWVKE' : (dims, np.sum(q * (U**2 + V**2) * lev_weight, axis=1),),
     }
     
@@ -276,7 +278,7 @@ def ifSkip(dt):
 
     skip = False
 
-    if dt.month in [5,6,7,8,9]:
+    if dt.month in [5,6,7,8]:
         skip = True
 
     return skip
