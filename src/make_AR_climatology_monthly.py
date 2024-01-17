@@ -15,7 +15,9 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument('--input-dir', required=True, help="Input directory.", type=str)
 parser.add_argument('--output-dir', required=True, help="Output directory.", type=str)
-parser.add_argument('--filename-prefix', required=True, help="The prefix of filename.", type=str)
+parser.add_argument('--input-filename-prefix', required=True, help="The prefix of filename.", type=str)
+parser.add_argument('--output-filename-prefix', help="The prefix of filename.", type=str, default="climatology_monthly-")
+parser.add_argument('--method', required=True, help="The prefix of filename.", type=str, choices=["q85", "mean"])
 parser.add_argument('--year-beg', required=True, help="The begin year.", type=int)
 parser.add_argument('--year-end', required=True, help="The end year.", type=int)
 parser.add_argument('--months', help="The end year.", type=int, nargs="+", default=[1,2,3,4,5,6,7,8,9,10,11,12])
@@ -36,7 +38,7 @@ def work(month, detect_phase=False):
         output_filename = os.path.join(
             args.output_dir,
             "{output_filename_prefix:s}{month:02d}.nc".format(
-                output_filename_prefix = "climatology_monthly-",
+                output_filename_prefix = args.output_filename_prefix,
                 month = month,
             )
         )
@@ -65,8 +67,8 @@ def work(month, detect_phase=False):
 
                 for dt in pd.date_range(dt_beg, dt_end, freq="D", inclusive="left"):
 
-                    filename = os.path.join(args.input_dir, "{filename_prefix:s}{datetime_str:s}".format(
-                        filename_prefix = args.filename_prefix,
+                    filename = os.path.join(args.input_dir, "{input_filename_prefix:s}{datetime_str:s}".format(
+                        input_filename_prefix = args.input_filename_prefix,
                         datetime_str    = dt.strftime("%Y-%m-%d_00.nc"),
                     ))
 
@@ -76,20 +78,37 @@ def work(month, detect_phase=False):
             ds = xr.open_mfdataset(load_files)
             ds = ds.chunk({"time": -1, "latitude": "auto", "longitude": "auto"})
            
-            print(ds) 
-            quantiles = np.array([.85,])
-            
-            merged_data = []
-            for varname in ["IVT", ]:
-                _quantiled_data = ds[varname].quantile(quantiles, keep_attrs=True, skipna=False, dim="time")
-                _quantiled_data = _quantiled_data.expand_dims(
-                    dim={"month": [month,]},
-                    axis=0,
-                )
-                merged_data.append(_quantiled_data)
+            print(ds)
+
                 
+            merged_data = []
+
+            if args.method == "q85":
+
+                quantile = .85
+                for varname in ["IVT", ]:
+                    _data = ds[varname].quantile(quantile, keep_attrs=True, skipna=False, dim="time")
+                    _data = _quantiled_data.expand_dims(
+                        dim={"month": [month,]},
+                        axis=0,
+                    )
+                    merged_data.append(_quantiled_data)
+
+            elif args.method == "mean":
+ 
+                for varname in ["IVT", ]:
+                    _data = ds[varname].mean(keep_attrs=True, skipna=False, dim="time")
+                    _data = _data.expand_dims(
+                        dim={"month": [month,]},
+                        axis=0,
+                    )
+                    merged_data.append(_data)
+
+                 
             print("[month=%d] Merging data..." % (month,))
-            ds_new = xr.merge(merged_data)
+
+            ds_new = xr.merge(merged_data).rename_dims(dict(latitude="lat", longitude="lon"))
+            ds_new.attrs["method"] = args.method
 
             print("[month=%d] Outputting file: %s" % (month, output_filename,))
             ds_new.to_netcdf(
@@ -126,6 +145,7 @@ for month in months:
     
     else:
         if result['need_work'] is True:
+            print("[detect] Need to work on file: ", result["output_filename"])
             input_args.append((month,))
         else:
             print("[detect] Files all exist for month =  %d." % (month,))
