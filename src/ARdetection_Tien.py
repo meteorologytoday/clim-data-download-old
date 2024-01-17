@@ -47,57 +47,35 @@ def getTheFarthestPtsOnSphere(pts):
 
 
 
-def ARGeometry(IVT, coord_lat, coord_lon):
+def basicARFilter(AR_obj):
+
+    result = True
     
-    # Assuming its a equal dlat-dlon grid
-    dlat = coord_lat[1, 0] - coord_lat[0, 0]
-    dlon = coord_lon[0, 1] - coord_lon[0, 0]
+    if AR_obj['aligned_fraction'] < 0.5:
+        return False
 
-    pts = np.zeros((Npts, 2))
-    pts[:, 0] = coord_lat[idx]
-    pts[:, 1] = coord_lon[idx]
+    if AR_obj['length'] < 2000e3:
+        return False
+
+    if AR_obj['aspect_ratio'] < 2.0:
+        return False
+
+   
+    return result
+
+
+def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.0, weight=None, filter_func=basicARFilter):
+
+    # Pseudo code: 
+    # 1. Generate object maps with intensity check
+    # 2. Direction Check
+    # 3. Geometry Check
+
+    # =============================================
+
+    # 1. Generate object maps with intensity check
     
-    pts = np.radians(pts)
-        
-    (pt_A, pt_B), farthest_dist = getTheFarthestPtsOnSphere(pts)
-    
-    pt_A
-    
-    
-    #
-    # 1 Construct segments
-    #
-
-    pt_A = farthest_pair
-
-    #
-    # 2 Construct orthogonal great-circle lines
-    #
-    # 3 Extract points in the AR-obj that are touched
-    #     by the great-circle lines in 4.2
-    #
-    # 4 Construct the AR-skeleton
-    #
-    #
-
-
-
-
-def ERAInterimLatLon_grid(lat, lon, dlat=180.0/256, dlon=360.0/512, lat_grid_bnd_start=180/256/2, lon_grid_bnd_start=0.0)
-
-
-
-def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, weight=None, filter_func=None):
- 
-    # 1. Generate object maps
-    # 2. Intensity Check
-    # 3. Direction Check
-    # 4. Geometry Check
-    
-    IVT_threshold = 500.0
     IVT = np.sqrt( IVT_x ** 2 + IVT_y ** 2 )
-
-
     IVT_binary = np.zeros_like(IVT, dtype=int)
     IVT_binary[IVT >= IVT_threshold] = 1
    
@@ -106,65 +84,80 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, weight=None, filte
 
     AR_objs = []
 
+    # Iterate through possible candidate
     for feature_n in range(1, num_features+1): # numbering starts at 1 
 
-        # 3. Direction Check. This can remove features such as tropical cyclone
+        print("feature_n = ", feature_n)
+        # 2. Direction Check. This can remove features such as tropical cyclone
         idx = labeled_array == feature_n
         Npts = np.sum(idx)
         covered_area = area[idx]
         sum_covered_area = np.sum(covered_area)
 
-        sub_IVT_x = IVT_x[idx] / IVT[idx]
-        sub_IVT_y = IVT_y[idx] / IVT[idx]
+        sub_IVT   = IVT[idx]
+        sub_IVT_x = IVT_x[idx]
+        sub_IVT_y = IVT_y[idx]
 
         mean_sub_IVT_x = np.sum(sub_IVT_x * covered_area) / sum_covered_area
         mean_sub_IVT_y = np.sum(sub_IVT_y * covered_area) / sum_covered_area
 
         mean_sub_IVT = np.sqrt(mean_sub_IVT_x**2 + mean_sub_IVT_y**2)       
 
-        mean_sub_IVT_x /= mean_sub_IVT
-        mean_sub_IVT_y /= mean_sub_IVT
+        
+        sub_IVTdir_x = sub_IVT_x / sub_IVT
+        sub_IVTdir_y = sub_IVT_y / sub_IVT
+
+        mean_sub_IVTdir_x = mean_sub_IVT_x / mean_sub_IVT
+        mean_sub_IVTdir_y = mean_sub_IVT_y / mean_sub_IVT
+
+        #print("(mean_sub_IVT_x, mean_sub_IVT_y) = (%.2f, %.2f)" % (mean_sub_IVT_x, mean_sub_IVT_y))
 
         # at this point, mean_sub_IVT_xy and sub_IVT_xy are all unit vectors
-        inner_products = sub_IVT_x * mean_sub_IVT_x + sub_IVT_y * mean_sub_IVT_y
-        aligned_pts = np.sum( inner_products <= np.cos(np.radians(45)) )
+        inner_products = sub_IVTdir_x * mean_sub_IVTdir_x + sub_IVTdir_y * mean_sub_IVTdir_y
 
+        aligned_pts = np.sum( inner_products >= np.cos(np.radians(45)) )
+        aligned_fraction = aligned_pts / Npts
             
         # If no more than half grid points have
         # the same direction within 45 degress,
         # discard the object
-        if aligned_pts / Npts < 0.5:
-            continue
-        
-        # 4. Geometry check
+
+       
+        # 3. Geometry check
  
+        # First find the length (greatest distance)
         pts = np.zeros((Npts, 2))
         pts[:, 0] = coord_lat[idx]
         pts[:, 1] = coord_lon[idx]
-        
         pts = np.radians(pts)
-            
         farthest_pair, farthest_dist = getTheFarthestPtsOnSphere(pts)
+      
+ 
+        # Compute centroid 
+        if weight is None:
+            _wgt = covered_area
+        else:
+            _wgt = covered_area * weight[idx]
 
+        _sum_wgt = np.sum(_wgt)
         
-        #
-        # 4.1 Construct segments
-        #
-        # 4.2 Construct orthogonal great-circle lines
-        #
-        # 4.3 Extract points in the AR-obj that are touched
-        #     by the great-circle lines in 4.2
-        #
-        # 4.4 Construct the AR-skeleton
-        #
-        #
+            
+             
+        centroid = (
+            np.sum(coord_lat[idx] * _wgt) / _sum_wgt,
+            np.sum(coord_lon[idx] * _wgt) / _sum_wgt,
+        )
 
+        eqv_wid = sum_covered_area / farthest_dist
+        aspect_ratio = farthest_dist / eqv_wid  # = farthest_dist**2 / sum_covered_area
 
         AR_obj = dict(
             feature_n     = feature_n,
             area          = sum_covered_area,
+            aligned_fraction = aligned_fraction,
             centroid      = centroid,
             length        = farthest_dist,
+            aspect_ratio  = aspect_ratio,
             farthest_pair = farthest_pair,
         )
  
@@ -173,33 +166,23 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, weight=None, filte
             continue 
 
         AR_objs.append(AR_obj)
-    
-    
+   
+    print("How many AR_objs? ", len(AR_objs)) 
+    for i, AR_obj in enumerate(AR_objs):
+        print("[%d] area = %f km^2, length = %f km" % (i, AR_obj["area"]/1e6, AR_obj['length']/1e3,)) 
     return labeled_array, AR_objs
 
-
-def basicARFilter(AR_obj):
-
-    result = True
-
-    if AR_obj['length'] < 1000e3:
-        
-        result = False
-    
-    return result
-
-# Algorithm
 
 
 if __name__  == "__main__" :
     
     import xarray as xr
 
-    test_file = "./data/ERA5/AR_processed/ERA5_AR_2016-01-15.nc"
-    test_clim_file = "./data/ERA5/AR_processed_clim/ERA5_AR_01-15.nc"
+    test_file = "./data/ERAinterim/24hr/ERAInterim-2017-01-10_00.nc"
+    test_clim_file = "./climatology_quantile_1993-2017_ERAInterim/ERAInterim-clim-daily_01-10_00.nc"
     
     ds = xr.open_dataset(test_file)
-    ds_clim = xr.open_dataset(test_clim_file)
+    ds_clim = xr.open_dataset(test_clim_file).sel(quantile=.85)
 
     print(ds)
     print(ds_clim)
@@ -217,11 +200,15 @@ if __name__  == "__main__" :
     ds = ds.assign_coords(lon=lon) 
     ds_clim = ds_clim.assign_coords(lon=lon) 
     
-    IVT_anom = (ds.IVT - ds_clim.IVT)[0, :, :].to_numpy()
-    IVT_full = ds.IVT[0, :, :].to_numpy()
+    IVT_x = ds["IVT_x"][0, :, :].to_numpy()
+    IVT_y = ds["IVT_y"][0, :, :].to_numpy()
+    IVT   = np.sqrt(IVT_x**2 + IVT_y**2)
+    IVT_clim = ds_clim["IVT"].isel(time=0).to_numpy()
+
+    print("Dimension check: dim(IVT_clim) = ", IVT_clim.shape)
+
 
     llat, llon = np.meshgrid(lat, lon, indexing='ij')
-
 
     dlat = np.deg2rad((lat[0] - lat[1]))
     dlon = np.deg2rad((lon[1] - lon[0]))
@@ -231,19 +218,17 @@ if __name__  == "__main__" :
     area = R_earth**2 * np.cos(np.deg2rad(llat)) * dlon * dlat
 
     print("Compute AR_objets")
+    
 
-    algo_results = dict( 
-        ANOMIVT250 = dict(
-            result=detectARObjects(IVT_anom, llat, llon, area, IVT_threshold=250.0, weight=IVT_full, filter_func = basicARFilter),
-            IVT=IVT_anom,
+    algo_results = dict(
+         ANOMLEN2 = dict(
+            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=IVT_clim, weight=IVT, filter_func = basicARFilter),
+            IVT=IVT,
         ),
+
         TOTIVT500 = dict(
-            result=detectARObjects(IVT_full, llat, llon, area, IVT_threshold=500.0, weight=IVT_full, filter_func = basicARFilter),
-            IVT=IVT_full,
-        ),
-        TOTIVT250 = dict(
-            result=detectARObjects(IVT_full, llat, llon, area, IVT_threshold=250.0, weight=IVT_full, filter_func = None),
-            IVT=IVT_full,
+            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=500.0, weight=IVT, filter_func = basicARFilter),
+            IVT=IVT,
         ),
     )
 
@@ -263,8 +248,8 @@ if __name__  == "__main__" :
 
     plot_lon_l = -180.0
     plot_lon_r = 180.0
-    plot_lat_b = 0.0
-    plot_lat_t = 70.0
+    plot_lat_b = -90.0
+    plot_lat_t = 90.0
 
     proj = ccrs.PlateCarree(central_longitude=cent_lon)
     proj_norm = ccrs.PlateCarree()
@@ -279,10 +264,7 @@ if __name__  == "__main__" :
     )
 
 
-
-        
-
-    for i, keyname in enumerate(["TOTIVT250", "TOTIVT500", "ANOMIVT250"]):
+    for i, keyname in enumerate(["ANOMLEN2", "TOTIVT500"]):
 
         print("Plotting :", keyname)
         
@@ -309,12 +291,12 @@ if __name__  == "__main__" :
         for i, AR_obj in enumerate(_AR_objs):
             pts = AR_obj["farthest_pair"]
             cent = AR_obj["centroid"]
-            _ax.plot([pts[0][1], pts[1][1]], [pts[0][0], pts[1][0]], 'r-', transform=ccrs.Geodetic(), zorder=99)
+            _ax.plot(np.degrees([pts[0][1], pts[1][1]]), np.degrees([pts[0][0], pts[1][0]]), 'r-', transform=ccrs.Geodetic(), zorder=99)
 
             _ax.text(cent[1], cent[0], "%d" % (i+1), va="center", ha="center", color="cyan", transform=proj_norm, zorder=100)
 
         _ax.set_global()
-        _ax.coastlines()
+        #_ax.coastlines()
         _ax.set_extent([plot_lon_l, plot_lon_r, plot_lat_b, plot_lat_t], crs=proj_norm)
 
         gl = _ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
