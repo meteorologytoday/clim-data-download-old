@@ -10,8 +10,23 @@ def pleaseRun(cmd):
     print(">> %s" % cmd)
     os.system(cmd)
 
-beg_time = datetime.datetime(1993,     1, 1)
-end_time = datetime.datetime(2005,    12, 1)
+def ifSkip(dt):
+
+    skip = False
+
+    if dt.month in [5,6,7,8]:
+        skip = True
+
+    if dt.month == 4 and dt.day > 15:
+        skip = True
+
+    if dt.month == 9 and dt.day < 15:
+        skip = True
+
+    return skip
+
+beg_time = datetime.datetime(1992,    9, 1)
+end_time = datetime.datetime(2017,    5, 1)
 
 archive_root = "data"
 
