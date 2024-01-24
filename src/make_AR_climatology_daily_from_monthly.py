@@ -22,7 +22,7 @@ parser.add_argument('--nproc', type=int, default=1)
 args = parser.parse_args()
 print(args)
 
-ref_dt = pd.Timestamp("2001-01-01") # no-leap year
+ref_dt = pd.Timestamp("2000-01-01") # leap year
 
 def getTimedeltaOfAMonth(dt):
     dt1 = pd.Timestamp(year=dt.year, month=dt.month, day=1)
@@ -179,7 +179,7 @@ failed_dates = []
 
 input_args = []
 
-dts = pd.date_range("2001-01-01", "2002-01-01", freq="D", inclusive="left")
+dts = pd.date_range("2000-01-01", "2001-01-01", freq="D", inclusive="left")
 
 for dt in dts:
 

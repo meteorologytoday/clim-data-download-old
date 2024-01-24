@@ -17,10 +17,10 @@ parser = argparse.ArgumentParser(
 parser.add_argument('--input-dir', required=True, type=str)
 parser.add_argument('--output-dir', required=True, type=str)
 parser.add_argument('--input-file-prefix', type=str, required=True)
+parser.add_argument('--input-clim-dir', required=True, type=str)
 parser.add_argument('--input-clim-file-prefix', type=str, required=True)
-parser.add_argument('--output-file-prefix', type=str, default="ARobjs")
-parser.add_argument('--method', required=True, type=str, choices=["ANOM_LEN", "ANOMLEN2",])
-parser.add_argument('--AR-clim-dir', required=True, type=str)
+parser.add_argument('--output-file-prefix', type=str, default="ARobjs_")
+parser.add_argument('--method', required=True, type=str, choices=["ANOMLEN", "ANOMLEN2", "ANOMLEN3", "ANOMLEN4"])
 parser.add_argument('--leftmost-lon', type=float, help='The leftmost longitude on the map. It matters when doing object detection finding connectedness.', default=0)
 parser.add_argument('--nproc', type=int, default=1)
 args = parser.parse_args()
@@ -33,42 +33,8 @@ input_file_prefix = args.input_file_prefix
 input_clim_file_prefix = args.input_clim_file_prefix
 output_file_prefix = args.output_file_prefix
 
-
 beg_time_str = beg_time.strftime("%Y-%m-%d")
 end_time_str = end_time.strftime("%Y-%m-%d")
-
-
-
-def myARFilter_ANOMLEN(AR_obj):
-
-    result = True
-    
-    length_min = 1000e3
-    area_min = 1000e3 * 100e3
-
-    if (AR_obj['length'] < length_min) or AR_obj['area'] < area_min:
-        result = False
-    
-    return result
-
-def myARFilter_ANOMLEN2(AR_obj):
-
-    result = True
-    
-    if AR_obj['aligned_fraction'] < 0.5:
-        return False
-
-    if AR_obj['length'] < 2000e3:
-        return False
-
-    if AR_obj['aspect_ratio'] < 2.0:
-        return False
-
-   
-    return result
-
-
-
 
 def doJob(dt, detect_phase=False):
 
@@ -78,9 +44,9 @@ def doJob(dt, detect_phase=False):
     try: 
         
         # Load file
-        AR_clim_file = "%s/%s_%s.nc" % (args.AR_clim_dir, input_clim_file_prefix, dt.strftime("%m-%d"))
-        AR_full_file = "%s/%s_%s.nc" % (input_dir,        input_file_prefix,      dt.strftime("%Y-%m-%d"))
-        output_file  = "%s/%s_%s.nc"  % (output_dir,      output_file_prefix,     dt.strftime("%Y-%m-%d"))
+        AR_clim_file = "%s/%s%s.nc" % (args.input_clim_dir, input_clim_file_prefix, dt.strftime("%m-%d_%H"))
+        AR_full_file = "%s/%s%s.nc" % (input_dir,        input_file_prefix,      dt.strftime("%Y-%m-%d_%H"))
+        output_file  = "%s/%s%s.nc"  % (output_dir,      output_file_prefix,     dt.strftime("%Y-%m-%d_%H"))
 
         # Test if file exists
         if detect_phase == True:
@@ -114,9 +80,10 @@ def doJob(dt, detect_phase=False):
         ds_full = ds_full.assign_coords(lon=lon) 
         ds_clim = ds_clim.assign_coords(lon=lon) 
         
-        IVT_full = ds_full.IVT[0, :, :].to_numpy()
+        IVT_x = ds_full.IVT_x[0, :, :].to_numpy()
+        IVT_y = ds_full.IVT_y[0, :, :].to_numpy()
+        IVT = np.sqrt(IVT_x**2 + IVT_y**2)
         IVT_clim = ds_clim.IVT[0, :, :].to_numpy()
-        IVT_anom = IVT_full - IVT_clim
 
         # This is in degrees
         llat, llon = np.meshgrid(lat, lon, indexing='ij')
@@ -137,28 +104,61 @@ def doJob(dt, detect_phase=False):
 
         print("[%s] Compute AR_objets using method: %s" % (jobname, args.method))
 
-        if args.method == "ANOM_LEN": 
+        if args.method == "ANOMLEN": 
 
             labeled_array, AR_objs = ARdetection_Tien.detectARObjects(
-                IVT_anom, llat, llon, area,
-                IVT_threshold=250.0,
-                weight=IVT_full,
-                filter_func = myARFilter_ANOMLEN,
+                IVT_x, IVT_y, llat, llon, area,
+                IVT_threshold=IVT_clim+250,
+                weight=IVT,
+                filter_func = ARdetection_Tien.ARFilter_ANOMLEN,
             )
 
-        elif args.method == "ANOMLEN2": 
+        elif args.method == "ANOMLEN2":
 
             # Remember, the IVT_clim here should refer to 85th percentile
             # user should provide the correct information with
             # `--AR-clim-dir` parameter
             IVT_clim[IVT_clim < 100.0] = 100.0
  
-            labeled_array, AR_objs = ARdetection.detectARObjects(
-                IVT_full, llat, llon, area,
+            labeled_array, AR_objs = ARdetection_Tien.detectARObjects(
+                IVT_x, IVT_y, llat, llon, area,
                 IVT_threshold=IVT_clim, # Remember, the IVT_clim here should refer to 85th percentile
-                weight=IVT_full,
-                filter_func = myARFilter_ANOMLEN2,
+                weight=IVT,
+                filter_func = ARdetection_Tien.ARFilter_ANOMLEN2,
             )
+
+
+        elif args.method == "ANOMLEN3": 
+
+            # Remember, the IVT_clim here should refer to 85th percentile
+            # user should provide the correct information with
+            # `--AR-clim-dir` parameter
+            IVT_clim[IVT_clim < 100.0] = 100.0
+ 
+            labeled_array, AR_objs = ARdetection_Tien.detectARObjects(
+                IVT_x, IVT_y, llat, llon, area,
+                IVT_threshold=IVT_clim, # Remember, the IVT_clim here should refer to 85th percentile
+                weight=IVT,
+                filter_func = ARdetection_Tien.ARFilter_ANOMLEN3,
+            )
+
+        elif args.method == "ANOMLEN4": 
+
+            # Remember, the IVT_clim here should refer to 85th percentile
+            # user should provide the correct information with
+            # `--AR-clim-dir` parameter
+            IVT_clim[IVT_clim < 100.0] = 100.0
+ 
+            labeled_array, AR_objs = ARdetection_Tien.detectARObjects(
+                IVT_x, IVT_y, llat, llon, area,
+                IVT_threshold=IVT_clim, # Remember, the IVT_clim here should refer to 85th percentile
+                weight=IVT,
+                filter_func = ARdetection_Tien.ARFilter_ANOMLEN4,
+            )
+
+
+        else:
+            raise Exception("Unknown method: %s" % (args.method,))
           
         # Convert AR object array into Dataset format
         Nobj = len(AR_objs)
@@ -206,6 +206,7 @@ def doJob(dt, detect_phase=False):
             encoding={'time': {'dtype': 'i4'}},
         )
 
+        result['status'] = 'OK'
     except Exception as e:
 
         print("[%s] Error. Now print stacktrace..." % (jobname,))
@@ -213,16 +214,7 @@ def doJob(dt, detect_phase=False):
         traceback.print_exc()
 
 
-    return output_file
-
-def ifSkip(dt):
-
-    skip = False
-
-    if dt.month in [4,5,6,7,8,9]:
-        skip = True
-
-    return skip
+    return result
 
 
 dts = pd.date_range(beg_time_str, end_time_str, freq="D", inclusive="both")
@@ -249,7 +241,7 @@ for dt in dts:
     else:
         input_args.append((dt, ))
     
-with Pool(processes=nproc) as pool:
+with Pool(processes=args.nproc) as pool:
 
     results = pool.starmap(doJob, input_args)
 

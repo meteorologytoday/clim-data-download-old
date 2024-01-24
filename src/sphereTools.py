@@ -12,6 +12,34 @@ def latlon2xyz(lat, lon, r=1.0):
 
     return x, y, z
 
+def xyz2latlon(pt):
+    
+    pt = normVec(pt)
+
+    sin_lat = pt[2]
+
+    if sin_lat == 1:
+        lat = np.pi/2
+        lon = 0.0
+        return lat, lon
+    elif sin_lat == -1:
+        lat = np.pi/2
+        lon = 0.0
+        return lat, lon
+
+    cos_lat = np.sqrt(1.0 - sin_lat**2)
+   
+
+ 
+    lat = np.arcsin(pt[2])
+    
+    cos_lon = pt[0] / cos_lat
+    sin_lon = pt[1] / cos_lat
+
+    lon = np.arctan2(sin_lon, cos_lon)
+
+    return lat, lon
+    
 
 def getAngleOnSphere(lat1, lon1, lat2, lon2):
     _lat1 = lat1
@@ -55,34 +83,21 @@ def removeComponent(v, v0):
     return v_new 
     
 
-def xyz2latlon(pt):
+def getLocalUnitXYZ(lat, lon):
     
-    pt = normVec(pt)
+    local_unit_z = normVec(np.array(latlon2xyz(lat, lon)))
 
-    sin_lat = pt[2]
+    local_unit_x = np.array([
+        - np.sin(lon),
+          np.cos(lon),
+          0.0,
+    ])
 
-    if sin_lat == 1:
-        lat = np.pi/2
-        lon = 0.0
-        return lat, lon
-    elif sin_lat == -1:
-        lat = np.pi/2
-        lon = 0.0
-        return lat, lon
+    local_unit_y = outerProduct(local_unit_z, local_unit_x)
 
-    cos_lat = np.sqrt(1.0 - sin_lat**2)
-   
 
- 
-    lat = np.arcsin(pt[2])
-    
-    cos_lon = pt[0] / cos_lat
-    sin_lon = pt[1] / cos_lat
+    return local_unit_x, local_unit_y, local_unit_z
 
-    lon = np.arctan2(sin_lon, cos_lon)
-
-    return lat, lon
-    
 
 def constructGreatCircleSegments(lat, lon, tan_vec, dbeta, n, r=1.0, vec_start="half"):
     

@@ -46,8 +46,19 @@ def getTheFarthestPtsOnSphere(pts):
     return farthest_pair, dist_mat[i, j]
 
 
+def ARFilter_ANOMLEN(AR_obj):
 
-def basicARFilter(AR_obj):
+    result = True
+    
+    length_min = 1000e3
+    area_min = 1000e3 * 100e3
+
+    if (AR_obj['length'] < length_min) or AR_obj['area'] < area_min:
+        result = False
+    
+    return result
+
+def ARFilter_ANOMLEN2(AR_obj):
 
     result = True
     
@@ -60,11 +71,71 @@ def basicARFilter(AR_obj):
     if AR_obj['aspect_ratio'] < 2.0:
         return False
 
-   
+    if AR_obj['IVT_shape_aligned'] < np.cos(np.radians(45)):
+        return False
+  
     return result
 
 
-def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.0, weight=None, filter_func=basicARFilter):
+def ARFilter_ANOMLEN3(AR_obj):
+
+    result = True
+    
+    if AR_obj['aligned_fraction'] < 0.5:
+        return False
+
+    if AR_obj['length'] < 2000e3:
+        return False
+
+    if AR_obj['aspect_ratio'] < 2.0:
+        return False
+
+    if AR_obj['IVT_shape_aligned'] < np.cos(np.radians(45)):
+        return False
+ 
+    if AR_obj['northest_edge'] >= 0 and AR_obj['southest_edge'] <= 0:
+        return False
+
+    # up to this point the entire AR is in the same hemisphere becuase of
+    # the previous filtering: if AR straddles across EQ then we discard it
+    northern_hemispheric_AR = ((AR_obj['northest_edge'] + AR_obj['southest_edge']) / 2) > 0.0
+    southern_hemispheric_AR = not northern_hemispheric_AR
+    if (northern_hemispheric_AR and AR_obj['mean_IVT_y'] < 50.0) or (southern_hemispheric_AR and AR_obj['mean_IVT_y'] > -50.0):
+        return False
+  
+    return result
+
+def ARFilter_ANOMLEN4(AR_obj):
+
+    result = True
+    
+    if AR_obj['aligned_fraction'] < 0.5:
+        return False
+
+    if AR_obj['length'] < 1500e3:
+        return False
+
+    if AR_obj['aspect_ratio'] < 2.0:
+        return False
+
+    if AR_obj['IVT_shape_aligned'] < np.cos(np.radians(45)):
+        return False
+ 
+    if AR_obj['northest_edge'] >= 0 and AR_obj['southest_edge'] <= 0:
+        return False
+
+    # up to this point the entire AR is in the same hemisphere becuase of
+    # the previous filtering: if AR straddles across EQ then we discard it
+    northern_hemispheric_AR = ((AR_obj['northest_edge'] + AR_obj['southest_edge']) / 2) > 0.0
+    southern_hemispheric_AR = not northern_hemispheric_AR
+    if (northern_hemispheric_AR and AR_obj['mean_IVT_y'] < 50.0) or (southern_hemispheric_AR and AR_obj['mean_IVT_y'] > -50.0):
+        return False
+  
+    return result
+
+
+
+def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.0, weight=None, filter_func=ARFilter_ANOMLEN2):
 
     # Pseudo code: 
     # 1. Generate object maps with intensity check
@@ -87,12 +158,17 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
     # Iterate through possible candidate
     for feature_n in range(1, num_features+1): # numbering starts at 1 
 
-        print("feature_n = ", feature_n)
+        #print("feature_n = ", feature_n)
         # 2. Direction Check. This can remove features such as tropical cyclone
         idx = labeled_array == feature_n
         Npts = np.sum(idx)
         covered_area = area[idx]
         sum_covered_area = np.sum(covered_area)
+
+        if Npts <= 3:
+            print("Not enough points. Skip this feature.")
+            continue
+
 
         sub_IVT   = IVT[idx]
         sub_IVT_x = IVT_x[idx]
@@ -114,7 +190,6 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
 
         # at this point, mean_sub_IVT_xy and sub_IVT_xy are all unit vectors
         inner_products = sub_IVTdir_x * mean_sub_IVTdir_x + sub_IVTdir_y * mean_sub_IVTdir_y
-
         aligned_pts = np.sum( inner_products >= np.cos(np.radians(45)) )
         aligned_fraction = aligned_pts / Npts
             
@@ -131,7 +206,38 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
         pts[:, 1] = coord_lon[idx]
         pts = np.radians(pts)
         farthest_pair, farthest_dist = getTheFarthestPtsOnSphere(pts)
-      
+
+        northest_edge = np.amax(pts[:, 0])
+        southest_edge = np.amin(pts[:, 0])
+
+        # ================================================================
+        # Check the alignment between the "shape" (farthest points), and
+        # the mean IVT vector
+        #       
+        # For the alignement, because the direction is different
+        # on every point due to sphere curvature, we need to place
+        # the vector end at the middle of the object as an approximation
+        seg_locs, seg_tan_vecs, seg_latlon_locs = sphereTools.constructGreatCircleSegmentsBetweenTwoPoints(
+            lat1=farthest_pair[0][0], lon1=farthest_pair[0][1],
+            lat2=farthest_pair[1][0], lon2=farthest_pair[1][1],
+            n=1,
+        )
+        
+        IVT_shape_latlon_midpoint = seg_latlon_locs[0, :]
+        IVT_shape_midpoint        = seg_locs[0, :]
+        IVT_shape_vec             = seg_tan_vecs[0, :]
+        local_unit_x, local_unit_y, _ = sphereTools.getLocalUnitXYZ(IVT_shape_latlon_midpoint[0], IVT_shape_latlon_midpoint[1])
+
+        local_IVT_shape_vec = sphereTools.normVec(np.array([
+            sphereTools.innerProduct(local_unit_x, IVT_shape_vec),
+            sphereTools.innerProduct(local_unit_y, IVT_shape_vec),
+        ]))
+
+        # This is the cosine between two vectors. We take absolute value because the
+        # farthest points can be swapped without affecting the alignment 
+        IVT_shape_aligned = np.abs(mean_sub_IVTdir_x * local_IVT_shape_vec[0] + mean_sub_IVTdir_y * local_IVT_shape_vec[1])
+        
+        # ================================================================
  
         # Compute centroid 
         if weight is None:
@@ -141,8 +247,6 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
 
         _sum_wgt = np.sum(_wgt)
         
-            
-             
         centroid = (
             np.sum(coord_lat[idx] * _wgt) / _sum_wgt,
             np.sum(coord_lon[idx] * _wgt) / _sum_wgt,
@@ -150,6 +254,9 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
 
         eqv_wid = sum_covered_area / farthest_dist
         aspect_ratio = farthest_dist / eqv_wid  # = farthest_dist**2 / sum_covered_area
+
+
+
 
         AR_obj = dict(
             feature_n     = feature_n,
@@ -159,17 +266,30 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
             length        = farthest_dist,
             aspect_ratio  = aspect_ratio,
             farthest_pair = farthest_pair,
+            IVT_shape_aligned = IVT_shape_aligned,
+            northest_edge = northest_edge,
+            southest_edge = southest_edge,
+            mean_IVT_x = mean_sub_IVT_x,
+            mean_IVT_y = mean_sub_IVT_y,
         )
  
+
         if (filter_func is not None) and (filter_func(AR_obj) is False):
             labeled_array[labeled_array == feature_n] = 0.0
             continue 
-
+        
         AR_objs.append(AR_obj)
+
+
    
     print("How many AR_objs? ", len(AR_objs)) 
     for i, AR_obj in enumerate(AR_objs):
-        print("[%d] area = %f km^2, length = %f km" % (i, AR_obj["area"]/1e6, AR_obj['length']/1e3,)) 
+        print("[%d] area = %f km^2, length = %f km; IVT_shape_aligned = %.2f" % (
+            i,
+            AR_obj["area"]/1e6,
+            AR_obj['length']/1e3,
+            AR_obj['IVT_shape_aligned'],
+        )) 
     return labeled_array, AR_objs
 
 
@@ -177,15 +297,23 @@ def detectARObjects(IVT_x, IVT_y, coord_lat, coord_lon, area, IVT_threshold=500.
 if __name__  == "__main__" :
     
     import xarray as xr
+    import pandas as pd
 
-    test_file = "./data/ERAinterim/24hr/ERAInterim-2017-01-10_00.nc"
-    test_clim_file = "./climatology_quantile_1993-2017_ERAInterim/ERAInterim-clim-daily_01-10_00.nc"
+    date_selected = pd.Timestamp("2017-02-10")
+    ymd_str = date_selected.strftime("%Y-%m-%d")
+    md_str = date_selected.strftime("%m-%d")
+
+    test_file = "./data/ERAinterim/AR/24hr/ERAInterim-%s_00.nc" % (ymd_str,)
+    test_clim_file = "./climatology_1993-2017_15days_ERAInterim_mean/ERAInterim-clim-daily_%s_00.nc" % (md_str,)
+    test_q85_file = "./climatology_1993-2017_15days_ERAInterim_q85/ERAInterim-clim-daily_%s_00.nc" % (md_str,)
     
     ds = xr.open_dataset(test_file)
-    ds_clim = xr.open_dataset(test_clim_file).sel(quantile=.85)
+    ds_clim = xr.open_dataset(test_clim_file)
+    ds_q85 = xr.open_dataset(test_q85_file)
 
     print(ds)
     print(ds_clim)
+    print(ds_q85)
 
     # find the lon=0
     lon_first_zero = np.argmax(ds.coords["lon"].to_numpy() >= 0)
@@ -199,12 +327,18 @@ if __name__  == "__main__" :
     # For some reason we need to reassign it otherwise the contourf will be broken... ??? 
     ds = ds.assign_coords(lon=lon) 
     ds_clim = ds_clim.assign_coords(lon=lon) 
+    ds_q85  = ds_q85.assign_coords(lon=lon) 
     
     IVT_x = ds["IVT_x"][0, :, :].to_numpy()
     IVT_y = ds["IVT_y"][0, :, :].to_numpy()
     IVT   = np.sqrt(IVT_x**2 + IVT_y**2)
     IVT_clim = ds_clim["IVT"].isel(time=0).to_numpy()
+    
+    IVT_q85  = ds_q85["IVT"].isel(time=0).to_numpy()
+    IVT_q85_adjusted = IVT_q85.copy()
+    IVT_q85_adjusted[IVT_q85_adjusted < 100.0] = 100.0
 
+    
     print("Dimension check: dim(IVT_clim) = ", IVT_clim.shape)
 
 
@@ -221,15 +355,28 @@ if __name__  == "__main__" :
     
 
     algo_results = dict(
-         ANOMLEN2 = dict(
-            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=IVT_clim, weight=IVT, filter_func = basicARFilter),
+
+         ANOMLEN = dict(
+            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=(IVT_clim+250), weight=IVT, filter_func = ARFilter_ANOMLEN),
             IVT=IVT,
         ),
 
-        TOTIVT500 = dict(
-            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=500.0, weight=IVT, filter_func = basicARFilter),
+         ANOMLEN2 = dict(
+            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=IVT_q85_adjusted, weight=IVT, filter_func = ARFilter_ANOMLEN2),
             IVT=IVT,
         ),
+
+         ANOMLEN3 = dict(
+            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=IVT_q85_adjusted, weight=IVT, filter_func = ARFilter_ANOMLEN3),
+            IVT=IVT,
+        ),
+
+         ANOMLEN4 = dict(
+            result=detectARObjects(IVT_x, IVT_y, llat, llon, area, IVT_threshold=IVT_q85_adjusted, weight=IVT, filter_func = ARFilter_ANOMLEN4),
+            IVT=IVT,
+        ),
+
+
     )
 
 
@@ -256,7 +403,7 @@ if __name__  == "__main__" :
 
     fig, ax = plt.subplots(
         len(list(algo_results.keys())), 1,
-        figsize=(12, 8),
+        figsize=(12, 12),
         subplot_kw=dict(projection=proj),
         gridspec_kw=dict(hspace=0.15, wspace=0.2),
         constrained_layout=False,
@@ -264,7 +411,7 @@ if __name__  == "__main__" :
     )
 
 
-    for i, keyname in enumerate(["ANOMLEN2", "TOTIVT500"]):
+    for i, keyname in enumerate(["ANOMLEN", "ANOMLEN2", "ANOMLEN3", "ANOMLEN4"]):
 
         print("Plotting :", keyname)
         
@@ -280,8 +427,8 @@ if __name__  == "__main__" :
 
         _ax.set_title(keyname)
         
-        levs = [np.linspace(0, 1000, 11), np.linspace(0, 1000, 11), np.linspace(-800, 800, 17)][i]
-        cmap = cm.get_cmap([ "ocean_r", "ocean_r", "bwr_r" ][i])
+        levs = np.linspace(0, 1000, 11)
+        cmap = cm.get_cmap("ocean_r")
 
         mappable = _ax.contourf(lon, lat, _IVT, levels=levs, cmap=cmap,  transform=proj_norm)
         plt.colorbar(mappable, ax=_ax, orientation="vertical")
@@ -296,7 +443,7 @@ if __name__  == "__main__" :
             _ax.text(cent[1], cent[0], "%d" % (i+1), va="center", ha="center", color="cyan", transform=proj_norm, zorder=100)
 
         _ax.set_global()
-        #_ax.coastlines()
+        _ax.coastlines()
         _ax.set_extent([plot_lon_l, plot_lon_r, plot_lat_b, plot_lat_t], crs=proj_norm)
 
         gl = _ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
@@ -314,6 +461,7 @@ if __name__  == "__main__" :
         gl.xlabel_style = {'size': 10, 'color': 'black'}
         gl.ylabel_style = {'size': 10, 'color': 'black'}
 
+    fig.suptitle(str(date_selected))
     plt.show()
 
 
