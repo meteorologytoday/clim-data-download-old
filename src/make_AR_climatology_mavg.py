@@ -20,7 +20,7 @@ parser.add_argument('--output-filename-prefix', help="The prefix of filename.", 
 parser.add_argument('--method', required=True, help="The prefix of filename.", type=str, choices=["q85", "mean"])
 parser.add_argument('--year-beg', required=True, help="The begin year.", type=int)
 parser.add_argument('--year-end', required=True, help="The end year.", type=int)
-parser.add_argument('--months', help="The end year.", type=int, nargs="+", default=[1,2,3,4,5,6,7,8,9,10,11,12])
+parser.add_argument('--mavg-days', help="Moving average days, can only be an odd number.", type=int, default="15")
 parser.add_argument('--nproc', type=int, default=1)
 args = parser.parse_args()
 print(args)
@@ -28,18 +28,26 @@ print(args)
 years = np.arange(args.year_beg, args.year_end+1, dtype=int)
 
 
+if args.mavg_days % 2 != 1:
+    raise Exception("`--mavg-days` should be an odd number.")
 
-def work(month, detect_phase=False):
 
-    result = dict(status="UNKNOWN", month=month, output_filename="", detect_phase=detect_phase)
+
+def work(dt, detect_phase=False):
+
+    result = dict(status="UNKNOWN", dt=dt, output_filename="", detect_phase=detect_phase)
 
     try:
 
+            
+        isfeb29 = dt.month == 2 and dt.day == 29
+
+        mmddhh_str = dt.strftime("%m-%d_%H")
         output_filename = os.path.join(
             args.output_dir,
-            "{output_filename_prefix:s}{month:02d}.nc".format(
+            "{output_filename_prefix:s}{mmddhh:s}.nc".format(
                 output_filename_prefix = args.output_filename_prefix,
-                month = month,
+                mmddhh = mmddhh_str,
             )
         )
         result["output_filename"] = output_filename
@@ -60,21 +68,33 @@ def work(month, detect_phase=False):
                 
             load_files = []
 
+            mavg_days_arm_window = (args.mavg_days - 1) / 2
+
             for y in years:
+                
+                _dt_leap_test = pd.Timestamp(year=y, month=1, day=1)
+                if isfeb29 and ( not _dt_leap_test.is_leap_year ):
+                    # Use Feb28 if the selected year is not a leap year
+                    dt_mid = pd.Timestamp(year=y, month=2, day=28)
+                else:
+                    dt_mid = pd.Timestamp(year=y, month=dt.month, day=dt.day)
 
-                dt_beg = pd.Timestamp(year=y, month=month, day=1)
-                dt_end = dt_beg + pd.tseries.offsets.DateOffset(months=1)
 
-                for dt in pd.date_range(dt_beg, dt_end, freq="D", inclusive="left"):
-
+                dt_beg = dt_mid - pd.Timedelta(days=mavg_days_arm_window)
+                dt_end = dt_mid + pd.Timedelta(days=mavg_days_arm_window)
+               
+                print("[%s] Loading date range: %s ~ %s" % (mmddhh_str, dt_beg.strftime("%Y-%m-%d"), dt_end.strftime("%Y-%m-%d")))
+ 
+                for _dt in pd.date_range(dt_beg, dt_end, freq="D", inclusive="both"):
+                    
                     filename = os.path.join(args.input_dir, "{input_filename_prefix:s}{datetime_str:s}".format(
                         input_filename_prefix = args.input_filename_prefix,
-                        datetime_str    = dt.strftime("%Y-%m-%d_00.nc"),
+                        datetime_str    = _dt.strftime("%Y-%m-%d_00.nc"),
                     ))
-
+                    
                     load_files.append(filename)
-
-            print("[month=%d] Loading %d files..." % (month, len(load_files),))
+            
+            print("[%s] Loading %d files..." % (mmddhh_str, len(load_files),))
             ds = xr.open_mfdataset(load_files)
             ds = ds.chunk({"time": -1, "latitude": "auto", "longitude": "auto"})
            
@@ -89,7 +109,7 @@ def work(month, detect_phase=False):
                 for varname in ["IVT", ]:
                     _data = ds[varname].quantile(quantile, keep_attrs=True, skipna=False, dim="time")
                     _data = _data.expand_dims(
-                        dim={"month": [month,]},
+                        dim={"time": [dt,]},
                         axis=0,
                     )
                     merged_data.append(_data)
@@ -99,21 +119,21 @@ def work(month, detect_phase=False):
                 for varname in ["IVT", ]:
                     _data = ds[varname].mean(keep_attrs=True, skipna=False, dim="time")
                     _data = _data.expand_dims(
-                        dim={"month": [month,]},
+                        dim={"time": [dt,]},
                         axis=0,
                     )
                     merged_data.append(_data)
 
                  
-            print("[month=%d] Merging data..." % (month,))
+            print("[%s] Merging data..." % (mmddhh_str,))
 
             ds_new = xr.merge(merged_data).rename_dims(dict(latitude="lat", longitude="lon"))
             ds_new.attrs["method"] = args.method
 
-            print("[month=%d] Outputting file: %s" % (month, output_filename,))
+            print("[%s] Outputting file: %s" % (mmddhh_str, output_filename,))
             ds_new.to_netcdf(
                 output_filename,
-                unlimited_dims="month",
+                unlimited_dims="time",
             )
 
         ds.close()
@@ -123,7 +143,7 @@ def work(month, detect_phase=False):
 
     except Exception as e:
 
-        print("[month=%d] Error. Now print stacktrace..." % (month,))
+        print("[%s] Error. Now print stacktrace..." % (mmddhh_str,))
         import traceback
         traceback.print_exc()
         
@@ -131,43 +151,61 @@ def work(month, detect_phase=False):
 
     return result
 
-months = np.array(args.months)
-failed_months = []
+def ifSkip(dt):
+
+    if dt.month in [5,6,7,8]:
+        return True
+
+    return False
+
+failed_dates = []
+dts = pd.date_range("2000-01-01", "2001-01-01", freq="D", inclusive="left")
 
 input_args = []
-for month in months:
 
-    print("Detect month: ", month)
-    result = work(month, detect_phase=True)
+for dt in dts:
+
+    dt_str = dt.strftime("%m-%d")
+
+
+    if ifSkip(dt):
+        print("Skip : %s" % (dt_str,))
+        continue
+
+    print("Detect date: ", dt_str)
+    result = work(dt, detect_phase=True)
     
     if result['status'] != 'OK':
         print("[detect] Failed to detect month %d " % (month,))
     
     else:
         if result['need_work'] is True:
-            print("[detect] Need to work on file: ", result["output_filename"])
-            input_args.append((month,))
+            print("[detect] Need to work on %s." % (dt_str,))
+            input_args.append((dt,))
         else:
-            print("[detect] Files all exist for month =  %d." % (month,))
+            print("[detect] Files all exist for month =  %s." % (dt_str,))
+
+
 
 
 print("Ready to do work...")
-        
 with Pool(processes=args.nproc) as pool:
 
     results = pool.starmap(work, input_args)
 
     for i, result in enumerate(results):
         if result['status'] != 'OK':
-            print('!!! Failed to generate output of month %d.' % (result['month'],))
-            failed_months.append(result['month'])
+            print('!!! Failed to generate output of month %s.' % (result['dt'].strftime("%m-%d"),))
+            failed_dates.append(result['dt'])
 
 
 print("Tasks finished.")
 
-if len(failed_months) == 0:
-    print("Congratualations! All months are successfully produced.")    
+if len(failed_dates) == 0:
+    print("Congratualations! All dates are successfully produced.")    
 else:
-    print("Failed months: ", failed_months)
+    print("Failed dates: ")
+    for i, failed_date in enumerate(failed_dates):
+        print("[%d] %s" % (i, failed_date.strftime("%m-%d"),) )
 
-print("Done.")
+print("Done.")       
