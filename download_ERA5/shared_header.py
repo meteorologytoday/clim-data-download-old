@@ -10,6 +10,7 @@ def pleaseRun(cmd):
     print(">> %s" % cmd)
     os.system(cmd)
 
+
 def ifSkip(dt):
 
     skip = False
@@ -25,8 +26,14 @@ def ifSkip(dt):
 
     return skip
 
-beg_time = datetime.datetime(1992,    9, 1)
-end_time = datetime.datetime(2017,    5, 1)
+# This is for AR
+#beg_time = datetime.datetime(1992,    9, 1)
+#end_time = datetime.datetime(2017,    5, 1)
+
+# This is for ECCC s2s project
+beg_time = datetime.datetime(1998,    1,  1)
+end_time = datetime.datetime(2018,    5, 1)
+
 
 archive_root = "data"
 
