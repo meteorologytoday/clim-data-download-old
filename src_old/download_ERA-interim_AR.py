@@ -2,6 +2,7 @@ with open("shared_header.py", "rb") as source_file:
     code = compile(source_file.read(), "shared_header.py", "exec")
 exec(code)
 
+
 import xarray as xr
 import traceback
 import numpy as np
@@ -12,25 +13,69 @@ from urllib.parse import urlparse
 
 # I think "sc" stands for "scalar"
 url_fmts = dict(
-    sc = "https://data.rda.ucar.edu/ds627.0/ei.oper.an.sfc/{yyyymm}/ei.oper.an.sfc.regn128{label}.{yyyymmddhh}",
+    uv = "https://data.rda.ucar.edu/ds627.0/ei.oper.an.pl/%s/ei.oper.an.pl.regn128uv.%s",
+    sc = "https://data.rda.ucar.edu/ds627.0/ei.oper.an.pl/%s/ei.oper.an.pl.regn128sc.%s",
 )
 
-labels = ["sc",]
-
-selected_varnames = dict(
-    sc = [
-        "lcc", "mcc", "hcc", "tcc",
-        "u10", "v10", "sst", "msl",
-    ]
-)
+labels = ["uv", "sc"]
 
 reference_time = pd.Timestamp("1970-01-01T00:00:00")
 
 print("!!!!! Please make sure xarray can use engine='cfgrib' (provided by ECMWF) !!!!!")
 
+def computeARvariables(ds):
+   
+    lev_da = ds.coords["isobaricInhPa"]
+    ds = ds.where((lev_da <= 1000) & (lev_da >=200), drop=True)
+ 
+    lat = ds.coords["latitude"].to_numpy()
+    lon = ds.coords["longitude"].to_numpy()
+    lev = ds.coords["isobaricInhPa"].to_numpy()
+
+    q = ds["q"].to_numpy()
+    U = ds["u"].to_numpy()
+    V = ds["v"].to_numpy()
+    
+    
+
+    lev_weight = np.zeros((len(lev),))
+    dlev = lev[:-1] - lev[1:]
+    lev_weight[1:-1] = (dlev[1:] + dlev[:-1]) / 2
+    lev_weight[0]    = dlev[0]  / 2
+    lev_weight[-1]   = dlev[-1] / 2
+    lev_weight *= 100.0 / g0  # convert into density
+    
+    print(lev_weight)
+    lev_weight = lev_weight[None, :, None, None]
+  
+    print(lev)
+
+
+    dims = ["time", "latitude", "longitude"]
+    AR_vars = {
+        'IWV'   : (dims, np.sum(q * lev_weight, axis=1)),
+        'IVT'   : (dims, np.sqrt(np.sum(q * U * lev_weight, axis=1)**2 + np.sum(q * V * lev_weight, axis=1)**2)),
+        'IVT_x' : (dims,np.sum(q * U * lev_weight, axis=1)),
+        'IVT_y' : (dims,np.sum(q * V * lev_weight, axis=1)),
+        'IWVKE' : (dims, np.sum(q * (U**2 + V**2) * lev_weight, axis=1),),
+    }
+    
+    ds_AR = xr.Dataset(
+        data_vars=AR_vars,
+        coords=dict(
+            lon=lon,
+            lat=lat,
+            time=ds.coords["time"],
+            reference_time=reference_time,
+        ),
+    )
+
+    return ds_AR 
+    
+
 def genERAInterimURL(dt, label):
     
-    url = url_fmts[label].format(
+    url = "https://data.rda.ucar.edu/ds627.0/ei.oper.an.pl/{yyyymm}/ei.oper.an.pl.regn128{label}.{yyyymmddhh}".format(
         yyyymm     = dt.strftime("%Y%m"),
         label      = label,
         yyyymmddhh = dt.strftime("%Y%m%d%H"),
@@ -55,9 +100,9 @@ def downloadFile(url, output, verbose=False):
             shutil.copyfileobj(download_resp.raw, f)
     
 
-dataset_name = "ERAinterim/sfc"
+dataset_name = "ERAinterim/AR"
 
-nproc = 10
+nproc = 5
 
 ERA_interim_dhr = 6
 print("ERA_interim_dhr = ", ERA_interim_dhr)
@@ -189,20 +234,14 @@ def doJob(t, detect_phase=False):
                         axis=0,
                     )
 
-                    ds_merge = []
-
-                    for label in labels:
-                        for varname in selected_varnames[label]:
-                            ds_merge.append(ds_sliced[varname])
-
-                    ds_out = xr.merge(ds_merge)
+                    ds_AR = computeARvariables(ds_sliced)
         
                     output_filename = os.path.join(
                         download_dir,
                         "%s-%s.nc" % (file_prefix, full_time_str, )
                     )
  
-                    ds_out.to_netcdf(
+                    ds_AR.to_netcdf(
                         output_filename, unlimited_dims="time",
                         encoding={'time':{'units':'hours since 1970-01-01 00:00:00'}}
                     )

@@ -20,7 +20,7 @@ labels = ["sc",]
 selected_varnames = dict(
     sc = [
         "lcc", "mcc", "hcc", "tcc",
-        "u10", "v10", "sst", "msl",
+        "u10", "v10", "sst",
     ]
 )
 

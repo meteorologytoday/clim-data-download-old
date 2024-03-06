@@ -2,6 +2,9 @@ with open("shared_header.py", "rb") as source_file:
     code = compile(source_file.read(), "shared_header.py", "exec")
 exec(code)
 
+with open("shared_header_3hr.py", "rb") as source_file:
+    code = compile(source_file.read(), "shared_header_3hr.py", "exec")
+exec(code)
 
 import traceback
 import cdsapi
@@ -11,32 +14,27 @@ import pandas as pd
 c = cdsapi.Client()
 
 
-dataset_name = "ERA5_global"
+dataset_name = "ERA5"
 
 def ifSkip(dt):
 
-    skip = False
-    if not ( dt.month in [11, 12, 1, 2] ):
-        skip = True
-
-    return skip
+    return False
 
 nproc = 5
 # ERA5 data is output in hourly fashion.
 # Each dhrs specify the averaged time after downloading data
-# Example: dhrs = [ 3, 24, ] 
-dhrs = [ 24,] 
+dhrs = [ 3, 24, ] 
 
 for dhr in dhrs:
     if 24 % dhr != 0:
         raise Exception("Not cool. 24 / dhr (dhr = %d) is not an integer." % (dhr, ) )
 
 varnames = [
-#    'geopotential', 
+    'geopotential', 
     'mean_sea_level_pressure',
-#    'sea_surface_temperature',
-#    '10m_u_component_of_wind', 
-#    '10m_v_component_of_wind', 
+    'sea_surface_temperature',
+    '10m_u_component_of_wind', 
+    '10m_v_component_of_wind', 
 ]
 
 var_type = dict(
@@ -56,15 +54,9 @@ var_type = dict(
 )
 
 
-# This is the old version
-# area = [
-#     65, -180, 0, 180,
-# ]
-
 area = [
-    90, -180, -90, 180,
+    65, -180, 0, 180,
 ]
-
 
 full_pressure_levels = [
     '1', '2', '3',

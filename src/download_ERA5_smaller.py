@@ -11,15 +11,11 @@ import pandas as pd
 c = cdsapi.Client()
 
 
-dataset_name = "ERA5_global"
+dataset_name = "ERA5"
 
 def ifSkip(dt):
 
-    skip = False
-    if not ( dt.month in [11, 12, 1, 2] ):
-        skip = True
-
-    return skip
+    return False
 
 nproc = 5
 # ERA5 data is output in hourly fashion.
@@ -57,14 +53,9 @@ var_type = dict(
 
 
 # This is the old version
-# area = [
-#     65, -180, 0, 180,
-# ]
-
 area = [
-    90, -180, -90, 180,
+    65, -180, 0, 180,
 ]
-
 
 full_pressure_levels = [
     '1', '2', '3',
